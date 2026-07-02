@@ -1,0 +1,57 @@
+.sort-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sort-menu-wrap {
+  position: relative;
+}
+
+.sort-trigger {
+  white-space: nowrap;
+}
+.sort-caret {
+  transition: transform 0.2s ease;
+}
+.sort-caret.up {
+  transform: rotate(180deg);
+}
+
+.sort-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  border-radius: 14px;
+  min-width: 172px;
+  box-shadow: var(--shadow-md);
+}
+
+.sort-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.sort-item:hover {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+.sort-item.active {
+  color: var(--accent);
+}
+
+.sort-order {
+  padding: 10px 12px;
+}
