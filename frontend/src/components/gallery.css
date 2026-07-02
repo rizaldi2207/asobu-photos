@@ -1,26 +1,19 @@
+/* Column count is set in JS (MasonryGrid) so items can be distributed
+   round-robin for a horizontal, row-major reading order. */
 .masonry {
-  column-count: 4;
-  column-gap: 16px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
 }
-@media (max-width: 1500px) {
-  .masonry {
-    column-count: 3;
-  }
-}
-@media (max-width: 1000px) {
-  .masonry {
-    column-count: 2;
-  }
-}
-@media (max-width: 560px) {
-  .masonry {
-    column-count: 1;
-  }
+.masonry-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .masonry-item {
-  break-inside: avoid;
-  margin-bottom: 16px;
   animation: reveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
   will-change: transform, opacity;
 }
