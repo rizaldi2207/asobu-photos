@@ -7,6 +7,7 @@ import {
   IconDownload,
   IconShare,
   IconHeart,
+  IconTrash,
 } from "./icons.jsx";
 import "./lightbox.css";
 
@@ -17,6 +18,7 @@ export default function Lightbox({
   onNavigate,
   onToggleFavorite,
   onShare,
+  onDelete,
   readOnly = false,
 }) {
   const photo = index != null ? photos[index] : null;
@@ -122,6 +124,15 @@ export default function Lightbox({
                   <button className="btn" onClick={() => onShare?.(photo)}>
                     <IconShare width={17} height={17} />
                     Share
+                  </button>
+                )}
+                {!readOnly && onDelete && (
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => onDelete(photo)}
+                  >
+                    <IconTrash width={17} height={17} />
+                    Delete
                   </button>
                 )}
               </div>

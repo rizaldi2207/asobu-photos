@@ -7,6 +7,8 @@ export default function PhotoCard({
   onToggleFavorite,
   onShare,
   onDelete,
+  deleteLabel = "Delete",
+  deleteIcon: DeleteIcon = IconTrash,
   readOnly,
 }) {
   const ratio = photo.width && photo.height ? photo.height / photo.width : 0.72;
@@ -74,13 +76,13 @@ export default function PhotoCard({
             {!readOnly && onDelete && (
               <button
                 className="chip chip-danger"
-                title="Delete"
+                title={deleteLabel}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(photo);
                 }}
               >
-                <IconTrash width={17} height={17} />
+                <DeleteIcon width={17} height={17} />
               </button>
             )}
           </div>

@@ -7,8 +7,9 @@ import MasonryGrid from "../components/MasonryGrid.jsx";
 import Lightbox from "../components/Lightbox.jsx";
 import ShareModal from "../components/ShareModal.jsx";
 import PhotoPicker from "../components/PhotoPicker.jsx";
+import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import SortControl from "../components/SortControl.jsx";
-import { IconChevronLeft, IconPlus, IconShare, IconTrash } from "../components/icons.jsx";
+import { IconChevronLeft, IconPlus, IconShare, IconTrash, IconClose } from "../components/icons.jsx";
 import "./albums.css";
 
 const PAGE = 60;
@@ -32,6 +33,10 @@ export default function AlbumDetail() {
   const [lightbox, setLightbox] = useState(null);
   const [shareTarget, setShareTarget] = useState(null);
   const [picker, setPicker] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmAlbum, setConfirmAlbum] = useState(false);
+  const [deletingAlbum, setDeletingAlbum] = useState(false);
   const [sort, setSort] = useState("date");
   const [order, setOrder] = useState("desc");
 
@@ -108,11 +113,42 @@ export default function AlbumDetail() {
     toast("Removed from album", "success");
   };
 
-  const deleteAlbum = async () => {
-    if (!confirm(`Delete album "${album.name}"? Photos are kept in your library.`)) return;
-    await AlbumsApi.remove(id);
-    toast("Album deleted", "success");
-    navigate("/albums");
+  // Permanently delete the media itself (removes it from the library and storage,
+  // not just from this album). Triggered from the Lightbox via a confirm dialog.
+  // Keeps the lightbox on a valid neighbour, or closes it when the album empties.
+  const confirmDeletePhoto = async () => {
+    const photo = pendingDelete;
+    if (!photo) return;
+    setDeleting(true);
+    try {
+      await Photos.remove(photo.id);
+      const remaining = photos.filter((p) => p.id !== photo.id);
+      setPhotos(remaining);
+      offsetRef.current = Math.max(0, offsetRef.current - 1);
+      setAlbum((a) => (a ? { ...a, photoCount: Math.max(0, a.photoCount - 1) } : a));
+      setLightbox((idx) =>
+        idx == null ? idx : remaining.length === 0 ? null : Math.min(idx, remaining.length - 1)
+      );
+      toast("Photo deleted", "success");
+      setPendingDelete(null);
+    } catch {
+      toast("Could not delete photo", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const confirmDeleteAlbum = async () => {
+    setDeletingAlbum(true);
+    try {
+      await AlbumsApi.remove(id);
+      toast("Album deleted", "success");
+      navigate("/albums");
+    } catch {
+      toast("Could not delete album", "error");
+      setDeletingAlbum(false);
+      setConfirmAlbum(false);
+    }
   };
 
   const toggleFavorite = async (photo) => {
@@ -166,7 +202,7 @@ export default function AlbumDetail() {
           >
             <IconShare width={17} height={17} /> Share
           </button>
-          <button className="btn" onClick={deleteAlbum}>
+          <button className="btn" onClick={() => setConfirmAlbum(true)}>
             <IconTrash width={17} height={17} /> Delete
           </button>
         </div>
@@ -188,6 +224,8 @@ export default function AlbumDetail() {
               setShareTarget({ kind: "photo", id: p.id, label: p.originalName })
             }
             onDelete={removeFromAlbum}
+            deleteLabel="Remove from album"
+            deleteIcon={IconClose}
           />
           <div ref={sentinelRef} className="scroll-sentinel">
             {loadingMore && <div className="spin" />}
@@ -202,8 +240,39 @@ export default function AlbumDetail() {
         onNavigate={setLightbox}
         onToggleFavorite={toggleFavorite}
         onShare={(p) => setShareTarget({ kind: "photo", id: p.id, label: p.originalName })}
+        onDelete={setPendingDelete}
       />
       <ShareModal target={shareTarget} onClose={() => setShareTarget(null)} />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        danger
+        title="Delete permanently?"
+        message={
+          pendingDelete
+            ? `"${pendingDelete.originalName}" will be removed from your library and storage. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        busy={deleting}
+        onConfirm={confirmDeletePhoto}
+        onCancel={() => setPendingDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmAlbum}
+        danger
+        title="Delete album?"
+        message={
+          album
+            ? `"${album.name}" will be deleted. Your photos stay in your library.`
+            : ""
+        }
+        confirmLabel="Delete album"
+        busy={deletingAlbum}
+        onConfirm={confirmDeleteAlbum}
+        onCancel={() => setConfirmAlbum(false)}
+      />
 
       <PhotoPicker
         open={picker}

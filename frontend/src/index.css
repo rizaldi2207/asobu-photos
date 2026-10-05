@@ -128,6 +128,20 @@ button {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   filter: brightness(1.05);
 }
+.btn-danger:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+.btn-danger-solid {
+  background: #ff6b6b;
+  border: none;
+  color: #1a0f08;
+  box-shadow: 0 10px 30px -8px rgba(255, 107, 107, 0.5);
+}
+.btn-danger-solid:hover {
+  background: #ff6b6b;
+  filter: brightness(1.05);
+}
 
 .spin {
   width: 34px;

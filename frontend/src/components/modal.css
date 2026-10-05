@@ -40,6 +40,37 @@
   margin-bottom: 20px;
 }
 
+/* ---- Confirm dialog ---- */
+.confirm-backdrop {
+  z-index: 130; /* above the Lightbox (backdrop 100, controls 110) */
+}
+.confirm-modal {
+  max-width: 420px;
+  text-align: center;
+}
+.confirm-modal .modal-title {
+  font-size: 1.5rem;
+  justify-content: center;
+}
+.confirm-modal .modal-desc {
+  margin-bottom: 0;
+}
+.confirm-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  margin-bottom: 14px;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.12);
+  border: 1px solid #ff6b6b;
+}
+.confirm-modal .modal-actions {
+  justify-content: center;
+  margin-top: 22px;
+}
+
 /* ---- Dropzone ---- */
 .dropzone {
   margin-top: 20px;

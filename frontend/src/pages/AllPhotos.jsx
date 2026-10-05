@@ -5,6 +5,7 @@ import { useToast } from "../components/Toast.jsx";
 import MasonryGrid from "../components/MasonryGrid.jsx";
 import Lightbox from "../components/Lightbox.jsx";
 import ShareModal from "../components/ShareModal.jsx";
+import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import SortControl from "../components/SortControl.jsx";
 import { IconShare } from "../components/icons.jsx";
 
@@ -25,6 +26,8 @@ export default function AllPhotos() {
   const [hasMore, setHasMore] = useState(true);
   const [lightbox, setLightbox] = useState(null);
   const [shareTarget, setShareTarget] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [sort, setSort] = useState("date");
   const [order, setOrder] = useState("desc");
 
@@ -86,12 +89,25 @@ export default function AllPhotos() {
     setPhotos((ps) => ps.map((p) => (p.id === updated.id ? updated : p)));
   };
 
-  const remove = async (photo) => {
-    if (!confirm(`Delete "${photo.originalName}"? This cannot be undone.`)) return;
-    await Photos.remove(photo.id);
-    setPhotos((ps) => ps.filter((p) => p.id !== photo.id));
-    offsetRef.current = Math.max(0, offsetRef.current - 1);
-    toast("Photo deleted", "success");
+  const confirmDeletePhoto = async () => {
+    const photo = pendingDelete;
+    if (!photo) return;
+    setDeleting(true);
+    try {
+      await Photos.remove(photo.id);
+      const remaining = photos.filter((p) => p.id !== photo.id);
+      setPhotos(remaining);
+      offsetRef.current = Math.max(0, offsetRef.current - 1);
+      setLightbox((idx) =>
+        idx == null ? idx : remaining.length === 0 ? null : Math.min(idx, remaining.length - 1)
+      );
+      toast("Photo deleted", "success");
+      setPendingDelete(null);
+    } catch {
+      toast("Could not delete photo", "error");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -145,7 +161,7 @@ export default function AllPhotos() {
             onShare={(p) =>
               setShareTarget({ kind: "photo", id: p.id, label: p.originalName })
             }
-            onDelete={remove}
+            onDelete={setPendingDelete}
           />
           {/* Sentinel + loader for infinite scroll */}
           <div ref={sentinelRef} className="scroll-sentinel">
@@ -163,6 +179,21 @@ export default function AllPhotos() {
         onShare={(p) => setShareTarget({ kind: "photo", id: p.id, label: p.originalName })}
       />
       <ShareModal target={shareTarget} onClose={() => setShareTarget(null)} />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        danger
+        title="Delete permanently?"
+        message={
+          pendingDelete
+            ? `"${pendingDelete.originalName}" will be removed from your library and storage. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        busy={deleting}
+        onConfirm={confirmDeletePhoto}
+        onCancel={() => setPendingDelete(null)}
+      />
     </motion.div>
   );
 }

@@ -34,6 +34,8 @@ export default function MasonryGrid({
   onToggleFavorite,
   onShare,
   onDelete,
+  deleteLabel,
+  deleteIcon,
   readOnly = false,
 }) {
   const colCount = useColumnCount();
@@ -56,6 +58,8 @@ export default function MasonryGrid({
                 onToggleFavorite={onToggleFavorite}
                 onShare={onShare}
                 onDelete={onDelete}
+                deleteLabel={deleteLabel}
+                deleteIcon={deleteIcon}
                 readOnly={readOnly}
               />
             </div>
