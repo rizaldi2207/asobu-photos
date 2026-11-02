@@ -148,3 +148,11 @@ export const IconLock = (p) => (
     <path d="M8 11V7a4 4 0 0 1 8 0v4" />
   </svg>
 );
+
+// Picture frame with a star — "use as album cover".
+export const IconCover = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="m12 8.2 1.2 2.4 2.6.4-1.9 1.8.5 2.6-2.4-1.3-2.4 1.3.5-2.6-1.9-1.8 2.6-.4Z" />
+  </svg>
+);

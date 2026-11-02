@@ -109,7 +109,8 @@ export default function AlbumDetail() {
     await AlbumsApi.removePhoto(id, photo.id);
     setPhotos((ps) => ps.filter((p) => p.id !== photo.id));
     offsetRef.current = Math.max(0, offsetRef.current - 1);
-    setAlbum((a) => (a ? { ...a, photoCount: Math.max(0, a.photoCount - 1) } : a));
+    // Refresh metadata: count changes, and the cover may fall back to automatic.
+    loadMeta();
     toast("Removed from album", "success");
   };
 
@@ -125,7 +126,7 @@ export default function AlbumDetail() {
       const remaining = photos.filter((p) => p.id !== photo.id);
       setPhotos(remaining);
       offsetRef.current = Math.max(0, offsetRef.current - 1);
-      setAlbum((a) => (a ? { ...a, photoCount: Math.max(0, a.photoCount - 1) } : a));
+      loadMeta();
       setLightbox((idx) =>
         idx == null ? idx : remaining.length === 0 ? null : Math.min(idx, remaining.length - 1)
       );
@@ -148,6 +149,17 @@ export default function AlbumDetail() {
       toast("Could not delete album", "error");
       setDeletingAlbum(false);
       setConfirmAlbum(false);
+    }
+  };
+
+  // Pick a photo as the album cover, or pass null to go back to automatic.
+  const setCover = async (photo) => {
+    try {
+      const updated = await AlbumsApi.setCover(id, photo ? photo.id : null);
+      setAlbum(updated);
+      toast(photo ? "Album cover updated" : "Cover reset to newest photo", "success");
+    } catch (err) {
+      toast(err?.response?.data?.error || "Could not change cover", "error");
     }
   };
 
@@ -181,6 +193,20 @@ export default function AlbumDetail() {
             {album.description ? `${album.description} · ` : ""}
             <span className="count-tag">{album.photoCount}</span> photos
           </p>
+          {album.coverThumbUrl && (
+            <div className="cover-pick">
+              <img className="cover-pick-thumb" src={album.coverThumbUrl} alt="Album cover" />
+              <span>
+                Cover: <strong>{album.customCover ? "chosen" : "automatic (newest photo)"}</strong>
+                {!album.customCover && " — use the cover button on any photo to pick one"}
+              </span>
+              {album.customCover && (
+                <button className="btn" onClick={() => setCover(null)}>
+                  Reset to automatic
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="head-actions">
           <SortControl
@@ -226,6 +252,8 @@ export default function AlbumDetail() {
             onDelete={removeFromAlbum}
             deleteLabel="Remove from album"
             deleteIcon={IconClose}
+            coverPhotoId={album.customCover ? album.coverPhotoId : null}
+            onSetCover={setCover}
           />
           <div ref={sentinelRef} className="scroll-sentinel">
             {loadingMore && <div className="spin" />}
@@ -241,6 +269,8 @@ export default function AlbumDetail() {
         onToggleFavorite={toggleFavorite}
         onShare={(p) => setShareTarget({ kind: "photo", id: p.id, label: p.originalName })}
         onDelete={setPendingDelete}
+        coverPhotoId={album.customCover ? album.coverPhotoId : null}
+        onSetCover={setCover}
       />
       <ShareModal target={shareTarget} onClose={() => setShareTarget(null)} />
 

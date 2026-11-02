@@ -39,6 +39,8 @@ async function serializeAlbum(row, token) {
     photoCount: countRows[0].count,
     coverThumbUrl: cover ? cover.thumbUrl : null,
     coverPhotoId: cover ? cover.id : null,
+    // true when the user picked the cover; false when it falls back to the newest photo.
+    customCover: !!row.cover_photo_id,
   };
 }
 
@@ -116,24 +118,33 @@ router.get("/:id/photos", async (req, res, next) => {
   }
 });
 
-// PATCH /api/albums/:id — rename / change cover
+// PATCH /api/albums/:id — rename / change cover.
+// coverPhotoId: omitted = unchanged, null = automatic (newest photo), uuid = that photo,
+// which must be a member of this album.
 router.patch("/:id", async (req, res, next) => {
   try {
     const { name, description, coverPhotoId } = req.body || {};
+    const album = await findOwnedAlbum(req.params.id, req.user.id);
+    if (!album) return res.status(404).json({ error: "Not found" });
+
+    const setCover = coverPhotoId !== undefined;
     if (coverPhotoId) {
-      const { rows: own } = await query("SELECT 1 FROM photos WHERE id = $1 AND owner_id = $2", [
-        coverPhotoId,
-        req.user.id,
-      ]);
-      if (own.length === 0) return res.status(400).json({ error: "Cover photo not found" });
+      const { rows: member } = await query(
+        `SELECT 1 FROM album_photos ap JOIN photos p ON p.id = ap.photo_id
+         WHERE ap.album_id = $1 AND ap.photo_id = $2 AND p.owner_id = $3`,
+        [album.id, coverPhotoId, req.user.id]
+      );
+      if (member.length === 0) {
+        return res.status(400).json({ error: "Cover photo must be in this album" });
+      }
     }
     const { rows } = await query(
       `UPDATE albums SET
          name = COALESCE($2, name),
          description = COALESCE($3, description),
-         cover_photo_id = COALESCE($4, cover_photo_id)
-       WHERE id = $1 AND owner_id = $5 RETURNING *`,
-      [req.params.id, name || null, description ?? null, coverPhotoId || null, req.user.id]
+         cover_photo_id = CASE WHEN $4 THEN $5::uuid ELSE cover_photo_id END
+       WHERE id = $1 AND owner_id = $6 RETURNING *`,
+      [album.id, name || null, description ?? null, setCover, coverPhotoId || null, req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
     res.json(await serializeAlbum(rows[0]));
@@ -186,6 +197,11 @@ router.delete("/:id/photos/:photoId", async (req, res, next) => {
       return res.status(404).json({ error: "Not found" });
     }
     await query("DELETE FROM album_photos WHERE album_id = $1 AND photo_id = $2", [
+      req.params.id,
+      req.params.photoId,
+    ]);
+    // A photo removed from the album can no longer be its cover → back to automatic.
+    await query("UPDATE albums SET cover_photo_id = NULL WHERE id = $1 AND cover_photo_id = $2", [
       req.params.id,
       req.params.photoId,
     ]);

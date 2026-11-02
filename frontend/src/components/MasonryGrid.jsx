@@ -36,6 +36,8 @@ export default function MasonryGrid({
   onDelete,
   deleteLabel,
   deleteIcon,
+  coverPhotoId = null,
+  onSetCover,
   readOnly = false,
 }) {
   const colCount = useColumnCount();
@@ -60,6 +62,8 @@ export default function MasonryGrid({
                 onDelete={onDelete}
                 deleteLabel={deleteLabel}
                 deleteIcon={deleteIcon}
+                isCover={coverPhotoId === photo.id}
+                onSetCover={onSetCover}
                 readOnly={readOnly}
               />
             </div>

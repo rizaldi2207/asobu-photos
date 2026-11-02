@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { IconHeart, IconDownload, IconShare, IconTrash, IconPlay } from "./icons.jsx";
+import { IconHeart, IconDownload, IconShare, IconTrash, IconPlay, IconCover } from "./icons.jsx";
 
 export default function PhotoCard({
   photo,
@@ -9,6 +9,8 @@ export default function PhotoCard({
   onDelete,
   deleteLabel = "Delete",
   deleteIcon: DeleteIcon = IconTrash,
+  isCover = false,
+  onSetCover,
   readOnly,
 }) {
   const ratio = photo.width && photo.height ? photo.height / photo.width : 0.72;
@@ -73,6 +75,18 @@ export default function PhotoCard({
                 <IconShare width={17} height={17} />
               </button>
             )}
+            {!readOnly && onSetCover && !isCover && (
+              <button
+                className="chip"
+                title="Set as album cover"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSetCover(photo);
+                }}
+              >
+                <IconCover width={17} height={17} />
+              </button>
+            )}
             {!readOnly && onDelete && (
               <button
                 className="chip chip-danger"
@@ -91,6 +105,12 @@ export default function PhotoCard({
         {photo.isFavorite && (
           <span className="fav-badge">
             <IconHeart width={13} height={13} fill="currentColor" />
+          </span>
+        )}
+        {isCover && (
+          <span className={`cover-badge ${photo.isFavorite ? "cover-badge-shift" : ""}`}>
+            <IconCover width={13} height={13} />
+            Cover
           </span>
         )}
       </div>

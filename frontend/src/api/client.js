@@ -63,6 +63,9 @@ export const Albums = {
   addPhotos: (id, photoIds) =>
     api.post(`/albums/${id}/photos`, { photoIds }).then((r) => r.data),
   removePhoto: (id, photoId) => api.delete(`/albums/${id}/photos/${photoId}`),
+  // photoId = null resets to the automatic cover (newest photo in the album).
+  setCover: (id, photoId) =>
+    api.patch(`/albums/${id}`, { coverPhotoId: photoId }).then((r) => r.data),
 };
 
 export const Share = {

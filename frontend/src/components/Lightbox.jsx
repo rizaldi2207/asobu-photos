@@ -8,6 +8,7 @@ import {
   IconShare,
   IconHeart,
   IconTrash,
+  IconCover,
 } from "./icons.jsx";
 import "./lightbox.css";
 
@@ -19,6 +20,8 @@ export default function Lightbox({
   onToggleFavorite,
   onShare,
   onDelete,
+  coverPhotoId = null,
+  onSetCover,
   readOnly = false,
 }) {
   const photo = index != null ? photos[index] : null;
@@ -124,6 +127,16 @@ export default function Lightbox({
                   <button className="btn" onClick={() => onShare?.(photo)}>
                     <IconShare width={17} height={17} />
                     Share
+                  </button>
+                )}
+                {!readOnly && onSetCover && (
+                  <button
+                    className={`btn ${coverPhotoId === photo.id ? "btn-accent" : ""}`}
+                    onClick={() => coverPhotoId !== photo.id && onSetCover(photo)}
+                    disabled={coverPhotoId === photo.id}
+                  >
+                    <IconCover width={17} height={17} />
+                    {coverPhotoId === photo.id ? "Album cover" : "Set as cover"}
                   </button>
                 )}
                 {!readOnly && onDelete && (
