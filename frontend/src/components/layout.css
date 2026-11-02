@@ -104,6 +104,39 @@
   line-height: 1.5;
 }
 
+/* ---- Sidebar account block ---- */
+.sidebar-user {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+.sidebar-user-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.sidebar-user-link:hover {
+  color: var(--text);
+}
+.sidebar-user-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-user .chip {
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+
 /* ---- Main ---- */
 .app-main {
   padding: 28px 38px 60px;

@@ -60,6 +60,14 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-photos}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      # Initial admin — only used when the users table is empty (first boot after
+      # enabling auth). Existing photos/albums/share links are assigned to it.
+      # If ADMIN_PASSWORD is empty a random one is generated and printed to the logs.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
+      # Set to "true" when the app is only reached over HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
 
@@ -74,7 +82,7 @@ services:
   ngrok:
     image: ngrok/ngrok:latest
     restart: unless-stopped
-    command: http frontend:80 --url=https://resonate-caravan-catnip.ngrok-free.dev --basic-auth=${BASIC_AUTH}
+    command: http frontend:80 --url=https://resonate-caravan-catnip.ngrok-free.dev
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
     depends_on:

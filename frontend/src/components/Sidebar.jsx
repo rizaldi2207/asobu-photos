@@ -1,6 +1,15 @@
 import { NavLink } from "react-router-dom";
 import { motion } from "framer-motion";
-import { IconPhotos, IconAlbums, IconHeart, IconUpload } from "./icons.jsx";
+import {
+  IconPhotos,
+  IconAlbums,
+  IconHeart,
+  IconUpload,
+  IconUsers,
+  IconUser,
+  IconLogout,
+} from "./icons.jsx";
+import { useAuth } from "../auth/AuthContext.jsx";
 
 const nav = [
   { to: "/", label: "All Photos", Icon: IconPhotos, end: true },
@@ -8,7 +17,12 @@ const nav = [
   { to: "/favorites", label: "Favorites", Icon: IconHeart },
 ];
 
+const adminNav = [{ to: "/users", label: "Users", Icon: IconUsers }];
+
 export default function Sidebar({ onUpload }) {
+  const { user, logout } = useAuth();
+  const items = user?.role === "admin" ? [...nav, ...adminNav] : nav;
+
   return (
     <aside className="sidebar glass">
       <div className="brand">
@@ -20,7 +34,7 @@ export default function Sidebar({ onUpload }) {
       </div>
 
       <nav className="nav">
-        {nav.map(({ to, label, Icon, end }, i) => (
+        {items.map(({ to, label, Icon, end }, i) => (
           <motion.div
             key={to}
             initial={{ opacity: 0, x: -16 }}
@@ -51,9 +65,14 @@ export default function Sidebar({ onUpload }) {
         Upload
       </button>
 
-      <div className="sidebar-foot">
-        <span className="eyebrow">Gallery</span>
-        <p>Upload, organize, and share your moments.</p>
+      <div className="sidebar-user">
+        <NavLink to="/account" className="sidebar-user-link" title="Account settings">
+          <IconUser width={18} height={18} />
+          <span>{user?.username}</span>
+        </NavLink>
+        <button className="chip" title="Sign out" onClick={logout}>
+          <IconLogout width={17} height={17} />
+        </button>
       </div>
     </aside>
   );

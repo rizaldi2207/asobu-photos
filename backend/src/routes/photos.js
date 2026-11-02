@@ -58,6 +58,19 @@ function serialize(row) {
   };
 }
 
+// Same shape, but blob URLs are scoped to a share token so public recipients
+// (who have no session) can load them via /api/share/:token/photos/:id/*.
+function serializeShared(row, token) {
+  const base = `/api/share/${encodeURIComponent(token)}/photos/${row.id}`;
+  return {
+    ...serialize(row),
+    isFavorite: false,
+    thumbUrl: `${base}/thumb`,
+    fileUrl: `${base}/file`,
+    downloadUrl: `${base}/download`,
+  };
+}
+
 // Extract a single still frame from a video buffer using ffmpeg (returns a PNG
 // buffer, or null if extraction fails). Seeks ~0.5s in, falling back to frame 0.
 async function extractVideoFrame(buffer, name) {
@@ -111,7 +124,7 @@ async function buildThumbnail(file) {
 // Process a single uploaded image or video: generate a thumbnail/poster, push
 // both blobs to storage, and insert the metadata row. Returns the raw DB row
 // (or null if the file is neither an image nor a video).
-async function storePhotoFile(file) {
+async function storePhotoFile(file, ownerId) {
   const isImage = file.mimetype.startsWith("image/");
   const isVideo = file.mimetype.startsWith("video/");
   if (!isImage && !isVideo) return null;
@@ -127,8 +140,8 @@ async function storePhotoFile(file) {
 
   const { rows } = await query(
     `INSERT INTO photos
-       (id, original_name, mime_type, size_bytes, width, height, object_key, thumb_key)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (id, original_name, mime_type, size_bytes, width, height, object_key, thumb_key, owner_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
     [
       id,
@@ -139,6 +152,7 @@ async function storePhotoFile(file) {
       height,
       objectKey,
       thumbKey,
+      ownerId,
     ]
   );
   return rows[0];
@@ -154,7 +168,7 @@ router.post("/", upload.array("photos", 500), async (req, res, next) => {
 
     const created = [];
     for (const file of files) {
-      const row = await storePhotoFile(file);
+      const row = await storePhotoFile(file, req.user.id);
       if (row) created.push(serialize(row));
     }
 
@@ -175,10 +189,11 @@ router.get("/", async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 0, 200);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
-    let sql = `SELECT * FROM photos ORDER BY ${photoOrderClause(req.query.sort, req.query.order)}`;
-    const params = [];
+    let sql = `SELECT * FROM photos WHERE owner_id = $1
+      ORDER BY ${photoOrderClause(req.query.sort, req.query.order)}`;
+    const params = [req.user.id];
     if (limit > 0) {
-      sql += " LIMIT $1 OFFSET $2";
+      sql += " LIMIT $2 OFFSET $3";
       params.push(limit, offset);
     }
     const { rows } = await query(sql, params);
@@ -189,10 +204,11 @@ router.get("/", async (req, res, next) => {
 });
 
 // GET /api/favorites lives here for convenience (mounted separately too)
-router.get("/favorites", async (_req, res, next) => {
+router.get("/favorites", async (req, res, next) => {
   try {
     const { rows } = await query(
-      "SELECT * FROM photos WHERE is_favorite ORDER BY created_at DESC"
+      "SELECT * FROM photos WHERE owner_id = $1 AND is_favorite ORDER BY created_at DESC",
+      [req.user.id]
     );
     res.json(rows.map(serialize));
   } catch (err) {
@@ -203,7 +219,10 @@ router.get("/favorites", async (_req, res, next) => {
 // GET /api/photos/:id
 router.get("/:id", async (req, res, next) => {
   try {
-    const { rows } = await query("SELECT * FROM photos WHERE id = $1", [req.params.id]);
+    const { rows } = await query("SELECT * FROM photos WHERE id = $1 AND owner_id = $2", [
+      req.params.id,
+      req.user.id,
+    ]);
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
     res.json(serialize(rows[0]));
   } catch (err) {
@@ -211,23 +230,32 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-async function streamBlob(req, res, next, { key, disposition }) {
+async function streamBlob(req, res, next, opts) {
   try {
     const { rows } = await query(
       `SELECT object_key, thumb_key, mime_type, original_name, size_bytes
-       FROM photos WHERE id = $1`,
-      [req.params.id]
+       FROM photos WHERE id = $1 AND owner_id = $2`,
+      [req.params.id, req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
-    const row = rows[0];
+    await sendPhotoBlob(req, res, next, rows[0], opts);
+  } catch (err) {
+    next(err);
+  }
+}
 
+// Stream a photo's thumbnail or original (with Range support) for an already
+// authorized photo row. Shared by the owner routes and share-token routes.
+export async function sendPhotoBlob(req, res, next, row, { key, disposition }) {
+  try {
     const isThumb = key === "thumb";
     const objKey = isThumb ? row.thumb_key : row.object_key;
     const contentType = isThumb ? "image/webp" : row.mime_type;
     const total = isThumb ? null : Number(row.size_bytes);
 
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    // private: responses depend on the session/share token, so shared caches must not keep them.
+    res.setHeader("Cache-Control", "private, max-age=86400");
     if (disposition === "attachment") {
       const safe = encodeURIComponent(row.original_name);
       res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${safe}`);
@@ -283,8 +311,9 @@ router.get("/:id/download", (req, res, next) =>
 router.patch("/:id/favorite", async (req, res, next) => {
   try {
     const { rows } = await query(
-      `UPDATE photos SET is_favorite = NOT is_favorite WHERE id = $1 RETURNING *`,
-      [req.params.id]
+      `UPDATE photos SET is_favorite = NOT is_favorite
+       WHERE id = $1 AND owner_id = $2 RETURNING *`,
+      [req.params.id, req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
     res.json(serialize(rows[0]));
@@ -296,9 +325,12 @@ router.patch("/:id/favorite", async (req, res, next) => {
 // DELETE /api/photos/:id
 router.delete("/:id", async (req, res, next) => {
   try {
-    const { rows } = await query("SELECT * FROM photos WHERE id = $1", [req.params.id]);
+    const { rows } = await query("SELECT * FROM photos WHERE id = $1 AND owner_id = $2", [
+      req.params.id,
+      req.user.id,
+    ]);
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
-    await query("DELETE FROM photos WHERE id = $1", [req.params.id]);
+    await query("DELETE FROM photos WHERE id = $1 AND owner_id = $2", [req.params.id, req.user.id]);
     await removeObject(rows[0].object_key);
     await removeObject(rows[0].thumb_key);
     res.status(204).end();
@@ -307,4 +339,4 @@ router.delete("/:id", async (req, res, next) => {
   }
 });
 
-export { router as photosRouter, serialize as serializePhoto };
+export { router as photosRouter, serialize as serializePhoto, serializeShared as serializeSharedPhoto };

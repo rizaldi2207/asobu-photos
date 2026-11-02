@@ -53,7 +53,21 @@ in Vite dev the same proxy is configured in `vite.config.js`.
 - `routes/photos.js` — upload, list, favorites, and blob streaming. Uploads use multer in-memory storage (1 GB/file limit). `sharp` builds a 640px webp thumbnail; for videos, `extractVideoFrame()` shells out to **ffmpeg** to grab a poster frame (falling back to a neutral placeholder). `streamBlob()` honors HTTP `Range` requests on originals so videos can seek.
 - `routes/albums.js` / `routes/share.js` — albums (many-to-many via `album_photos`) and share links (opaque `crypto.randomBytes` base64url tokens, kind = `photo`|`album`|`all`, optional expiry).
 
-**Data model** (`db/schema.sql`): `photos`, `albums`, `album_photos` (join), `share_links`. Deleting a photo cascades to `album_photos`; album cover FK is `ON DELETE SET NULL`.
+**Auth** (`lib/auth.js`, `routes/auth.js`, `routes/users.js`): session cookie `asobu_session`
+(HttpOnly, SameSite=Lax; opaque token, only its SHA-256 is stored in `sessions`). Cookies rather than
+Bearer headers because `<img>`/`<video>` must load blob URLs directly. Passwords use Node's built-in
+scrypt. `loadSession` sets `req.user`; `requireAuth` guards `/api/photos|albums|favorites`,
+`requireAdmin` guards `/api/users`. Roles: `admin` (also manages users) and `user`. On boot
+`seedInitialAdmin()` creates the first admin from `ADMIN_USERNAME`/`ADMIN_PASSWORD` when `users` is
+empty (random password logged if unset) and assigns any `owner_id IS NULL` rows to it.
+
+**Authorization = ownership.** `photos`, `albums`, `share_links` have `owner_id`; every query in the
+authenticated routes must filter by `owner_id = req.user.id`. Share recipients have no session, so
+`/api/share/:token` serializes photos with `serializeSharedPhoto()` whose URLs point to
+`/api/share/:token/photos/:id/(thumb|file|download)`; those endpoints check the photo is within the
+link's scope before calling `sendPhotoBlob()`.
+
+**Data model** (`db/schema.sql`): `users`, `sessions`, `photos`, `albums`, `album_photos` (join), `share_links`. Deleting a photo cascades to `album_photos`; album cover FK is `ON DELETE SET NULL`.
 
 **Frontend** (`frontend/src`, React 18 + Vite):
 - `api/client.js` — the single axios layer (`Photos`, `Albums`, `Share`); all components go through it, never raw fetch.

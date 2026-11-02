@@ -1,6 +1,36 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: "/api" });
+const api = axios.create({ baseURL: "/api", withCredentials: true });
+
+// Any 401 from a protected endpoint means the session is gone — let the
+// AuthProvider drop the user and show the login screen.
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    const url = err?.config?.url || "";
+    if (err?.response?.status === 401 && !url.startsWith("/auth/")) {
+      window.dispatchEvent(new Event("auth:unauthorized"));
+    }
+    return Promise.reject(err);
+  }
+);
+
+export const Auth = {
+  me: () => api.get("/auth/me").then((r) => r.data),
+  login: (username, password) =>
+    api.post("/auth/login", { username, password }).then((r) => r.data),
+  logout: () => api.post("/auth/logout"),
+  changePassword: (currentPassword, newPassword) =>
+    api.post("/auth/password", { currentPassword, newPassword }),
+};
+
+export const Users = {
+  list: () => api.get("/users").then((r) => r.data),
+  create: (username, password, role) =>
+    api.post("/users", { username, password, role }).then((r) => r.data),
+  update: (id, patch) => api.patch(`/users/${id}`, patch).then((r) => r.data),
+  remove: (id) => api.delete(`/users/${id}`),
+};
 
 export const Photos = {
   list: (params) => api.get("/photos", { params }).then((r) => r.data),

@@ -1,11 +1,18 @@
 import { Router } from "express";
 import { query } from "../db/pool.js";
-import { serializePhoto, photoOrderClause, SORT_KEYS } from "./photos.js";
+import { serializePhoto, serializeSharedPhoto, photoOrderClause, SORT_KEYS } from "./photos.js";
 
 const router = Router();
 
-// Attach a thumbnail + photo count to an album row.
-async function serializeAlbum(row) {
+// Load an album only if it belongs to the current user (null otherwise).
+async function findOwnedAlbum(id, userId) {
+  const { rows } = await query("SELECT * FROM albums WHERE id = $1 AND owner_id = $2", [id, userId]);
+  return rows[0] || null;
+}
+
+// Attach a thumbnail + photo count to an album row. `token` (optional) scopes
+// the cover URL to a share link for public recipients.
+async function serializeAlbum(row, token) {
   // Prefer the explicit cover photo; otherwise fall back to the most recent member.
   const { rows: coverRows } = await query(
     `SELECT p.* FROM photos p
@@ -19,7 +26,11 @@ async function serializeAlbum(row) {
     "SELECT COUNT(*)::int AS count FROM album_photos WHERE album_id = $1",
     [row.id]
   );
-  const cover = coverRows[0] ? serializePhoto(coverRows[0]) : null;
+  const cover = coverRows[0]
+    ? typeof token === "string"
+      ? serializeSharedPhoto(coverRows[0], token)
+      : serializePhoto(coverRows[0])
+    : null;
   return {
     id: row.id,
     name: row.name,
@@ -32,10 +43,13 @@ async function serializeAlbum(row) {
 }
 
 // GET /api/albums
-router.get("/", async (_req, res, next) => {
+router.get("/", async (req, res, next) => {
   try {
-    const { rows } = await query("SELECT * FROM albums ORDER BY created_at DESC");
-    const albums = await Promise.all(rows.map(serializeAlbum));
+    const { rows } = await query(
+      "SELECT * FROM albums WHERE owner_id = $1 ORDER BY created_at DESC",
+      [req.user.id]
+    );
+    const albums = await Promise.all(rows.map((r) => serializeAlbum(r)));
     res.json(albums);
   } catch (err) {
     next(err);
@@ -50,8 +64,8 @@ router.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "Album name is required" });
     }
     const { rows } = await query(
-      "INSERT INTO albums (name, description) VALUES ($1, $2) RETURNING *",
-      [name.trim(), description || null]
+      "INSERT INTO albums (name, description, owner_id) VALUES ($1, $2, $3) RETURNING *",
+      [name.trim(), description || null, req.user.id]
     );
     res.status(201).json(await serializeAlbum(rows[0]));
   } catch (err) {
@@ -62,9 +76,9 @@ router.post("/", async (req, res, next) => {
 // GET /api/albums/:id — album metadata (photos are fetched via /:id/photos)
 router.get("/:id", async (req, res, next) => {
   try {
-    const { rows } = await query("SELECT * FROM albums WHERE id = $1", [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: "Not found" });
-    res.json(await serializeAlbum(rows[0]));
+    const album = await findOwnedAlbum(req.params.id, req.user.id);
+    if (!album) return res.status(404).json({ error: "Not found" });
+    res.json(await serializeAlbum(album));
   } catch (err) {
     next(err);
   }
@@ -81,6 +95,10 @@ router.get("/:id/photos", async (req, res, next) => {
     const orderBy = SORT_KEYS.includes(req.query.sort)
       ? photoOrderClause(req.query.sort, req.query.order, "p")
       : "ap.added_at DESC, p.id DESC";
+
+    if (!(await findOwnedAlbum(req.params.id, req.user.id))) {
+      return res.status(404).json({ error: "Not found" });
+    }
 
     let sql = `SELECT p.* FROM photos p
        JOIN album_photos ap ON ap.photo_id = p.id
@@ -102,13 +120,20 @@ router.get("/:id/photos", async (req, res, next) => {
 router.patch("/:id", async (req, res, next) => {
   try {
     const { name, description, coverPhotoId } = req.body || {};
+    if (coverPhotoId) {
+      const { rows: own } = await query("SELECT 1 FROM photos WHERE id = $1 AND owner_id = $2", [
+        coverPhotoId,
+        req.user.id,
+      ]);
+      if (own.length === 0) return res.status(400).json({ error: "Cover photo not found" });
+    }
     const { rows } = await query(
       `UPDATE albums SET
          name = COALESCE($2, name),
          description = COALESCE($3, description),
          cover_photo_id = COALESCE($4, cover_photo_id)
-       WHERE id = $1 RETURNING *`,
-      [req.params.id, name || null, description ?? null, coverPhotoId || null]
+       WHERE id = $1 AND owner_id = $5 RETURNING *`,
+      [req.params.id, name || null, description ?? null, coverPhotoId || null, req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
     res.json(await serializeAlbum(rows[0]));
@@ -120,7 +145,10 @@ router.patch("/:id", async (req, res, next) => {
 // DELETE /api/albums/:id
 router.delete("/:id", async (req, res, next) => {
   try {
-    const { rowCount } = await query("DELETE FROM albums WHERE id = $1", [req.params.id]);
+    const { rowCount } = await query("DELETE FROM albums WHERE id = $1 AND owner_id = $2", [
+      req.params.id,
+      req.user.id,
+    ]);
     if (rowCount === 0) return res.status(404).json({ error: "Not found" });
     res.status(204).end();
   } catch (err) {
@@ -135,16 +163,17 @@ router.post("/:id/photos", async (req, res, next) => {
     if (!Array.isArray(photoIds) || photoIds.length === 0) {
       return res.status(400).json({ error: "photoIds array is required" });
     }
-    for (const photoId of photoIds) {
-      await query(
-        `INSERT INTO album_photos (album_id, photo_id)
-         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [req.params.id, photoId]
-      );
-    }
-    const { rows } = await query("SELECT * FROM albums WHERE id = $1", [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: "Not found" });
-    res.json(await serializeAlbum(rows[0]));
+    const album = await findOwnedAlbum(req.params.id, req.user.id);
+    if (!album) return res.status(404).json({ error: "Not found" });
+    // Only photos owned by the same user can be added; others are silently skipped.
+    await query(
+      `INSERT INTO album_photos (album_id, photo_id)
+       SELECT $1, p.id FROM photos p
+       WHERE p.id = ANY($2::uuid[]) AND p.owner_id = $3
+       ON CONFLICT DO NOTHING`,
+      [album.id, photoIds, req.user.id]
+    );
+    res.json(await serializeAlbum(album));
   } catch (err) {
     next(err);
   }
@@ -153,6 +182,9 @@ router.post("/:id/photos", async (req, res, next) => {
 // DELETE /api/albums/:id/photos/:photoId — remove a photo from an album
 router.delete("/:id/photos/:photoId", async (req, res, next) => {
   try {
+    if (!(await findOwnedAlbum(req.params.id, req.user.id))) {
+      return res.status(404).json({ error: "Not found" });
+    }
     await query("DELETE FROM album_photos WHERE album_id = $1 AND photo_id = $2", [
       req.params.id,
       req.params.photoId,

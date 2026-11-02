@@ -1,0 +1,139 @@
+/* ---- Login ---- */
+.auth-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  border-radius: var(--radius);
+  padding: 34px 30px 30px;
+  box-shadow: var(--shadow-lg);
+}
+.auth-brand {
+  margin-bottom: 28px;
+}
+.auth-card .modal-title {
+  margin-bottom: 20px;
+}
+.auth-submit {
+  width: 100%;
+  justify-content: center;
+  padding: 13px;
+  margin-top: 6px;
+}
+.auth-error {
+  color: #ff6b6b;
+  font-size: 0.88rem;
+  margin: -4px 0 14px;
+}
+.auth-boot {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+/* ---- Account ---- */
+.panel {
+  max-width: 480px;
+  border-radius: var(--radius);
+  padding: 26px;
+}
+.panel-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.3rem;
+  margin-bottom: 18px;
+}
+
+/* ---- Selects inside form fields / user rows ---- */
+.field select,
+.user-role {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+}
+.field select:focus,
+.user-role:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ---- Users ---- */
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+}
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+}
+.user-avatar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: #1a0f08;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.user-info {
+  flex: 1;
+  min-width: 0;
+}
+.user-name {
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.user-you {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.user-meta {
+  font-size: 0.82rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.user-role {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+.user-row .chip {
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+.user-row .chip:disabled,
+.user-role:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+  .user-row {
+    flex-wrap: wrap;
+  }
+  .user-info {
+    flex-basis: calc(100% - 54px);
+  }
+}
