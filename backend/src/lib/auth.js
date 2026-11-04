@@ -150,32 +150,51 @@ export function requireAdmin(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
-// Login throttling — in-memory, per username and per client IP.
+// Login throttling — in-memory, fixed 15-minute windows.
+//  • one client guessing one account   (username+IP) → hard block
+//  • one client spraying many accounts (IP)          → hard block
+//  • one account attacked from many IPs (username)   → slow down, never block,
+//    so a stranger cannot lock the real owner out of their account.
 // ---------------------------------------------------------------------------
 const WINDOW_MS = 15 * 60 * 1000;
-const MAX_FAILURES = 10;
+const MAX_PAIR_FAILURES = 10;
+const MAX_IP_FAILURES = 30;
+const SLOW_USER_FAILURES = 10;
+const SLOW_DELAY_MS = 2000;
 const failures = new Map(); // key -> { count, first }
 
 function failureKeys(req, username) {
-  return [`u:${String(username || "").toLowerCase()}`, `ip:${req.ip}`];
+  const u = String(username || "").trim().toLowerCase();
+  return { user: `u:${u}`, ip: `ip:${req.ip}`, pair: `p:${u}|${req.ip}` };
+}
+
+function failureCount(key, now) {
+  const f = failures.get(key);
+  if (!f) return 0;
+  if (now - f.first > WINDOW_MS) {
+    failures.delete(key);
+    return 0;
+  }
+  return f.count;
 }
 
 export function isThrottled(req, username) {
   const now = Date.now();
-  return failureKeys(req, username).some((k) => {
-    const f = failures.get(k);
-    if (!f) return false;
-    if (now - f.first > WINDOW_MS) {
-      failures.delete(k);
-      return false;
-    }
-    return f.count >= MAX_FAILURES * (k.startsWith("ip:") ? 3 : 1);
-  });
+  const k = failureKeys(req, username);
+  return failureCount(k.pair, now) >= MAX_PAIR_FAILURES || failureCount(k.ip, now) >= MAX_IP_FAILURES;
+}
+
+// Delay to apply before checking the password (applied to every attempt, so a
+// client cannot learn the result early by aborting slow responses).
+export function loginDelayMs(req, username) {
+  return failureCount(failureKeys(req, username).user, Date.now()) >= SLOW_USER_FAILURES
+    ? SLOW_DELAY_MS
+    : 0;
 }
 
 export function recordFailure(req, username) {
   const now = Date.now();
-  for (const k of failureKeys(req, username)) {
+  for (const k of Object.values(failureKeys(req, username))) {
     const f = failures.get(k);
     if (!f || now - f.first > WINDOW_MS) failures.set(k, { count: 1, first: now });
     else f.count++;
@@ -183,8 +202,14 @@ export function recordFailure(req, username) {
 }
 
 export function clearFailures(req, username) {
-  failures.delete(`u:${String(username || "").toLowerCase()}`);
+  failures.delete(failureKeys(req, username).pair);
 }
+
+// Drop expired entries so spraying random usernames cannot grow the map forever.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, f] of failures) if (now - f.first > WINDOW_MS) failures.delete(k);
+}, 60 * 1000).unref();
 
 // ---------------------------------------------------------------------------
 // Bootstrap: create the initial admin if no users exist, then hand every

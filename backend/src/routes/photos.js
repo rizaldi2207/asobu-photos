@@ -3,13 +3,12 @@ import multer from "multer";
 import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { query } from "../db/pool.js";
 import {
   putObject,
+  putFile,
   getObjectStream,
   getPartialObjectStream,
   removeObject,
@@ -35,10 +34,41 @@ export function photoOrderClause(sort, order, alias = "") {
 }
 export { SORT_KEYS };
 
+// Uploads are spooled to temp files on disk (not RAM) so large or parallel
+// uploads cannot exhaust the backend's memory. The frontend sends batches of
+// ≤10 files, so 50 per request leaves headroom for API clients.
+const UPLOAD_MAX_FILES = 50;
+const MAX_CONCURRENT_UPLOADS_PER_USER = 2;
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB per file (covers most videos)
+  // No destination/filename → os.tmpdir() with random names (no user-controlled extension).
+  storage: multer.diskStorage({}),
+  limits: {
+    fileSize: 1024 * 1024 * 1024, // 1 GB per file (covers most videos)
+    files: UPLOAD_MAX_FILES,
+    fields: 20,
+    parts: UPLOAD_MAX_FILES + 20,
+  },
 });
+
+// Reject a user's upload while they already have MAX_CONCURRENT_UPLOADS_PER_USER in flight.
+const activeUploads = new Map(); // userId -> count
+function limitConcurrentUploads(req, res, next) {
+  const id = req.user.id;
+  const n = activeUploads.get(id) || 0;
+  if (n >= MAX_CONCURRENT_UPLOADS_PER_USER) {
+    return res.status(429).json({ error: "Too many uploads in progress. Please wait." });
+  }
+  activeUploads.set(id, n + 1);
+  let released = false;
+  res.on("close", () => {
+    if (released) return;
+    released = true;
+    const left = (activeUploads.get(id) || 1) - 1;
+    if (left > 0) activeUploads.set(id, left);
+    else activeUploads.delete(id);
+  });
+  next();
+}
 
 // Shape a DB row into the API representation the frontend expects.
 function serialize(row) {
@@ -71,36 +101,65 @@ function serializeShared(row, token) {
   };
 }
 
-// Extract a single still frame from a video buffer using ffmpeg (returns a PNG
-// buffer, or null if extraction fails). Seeks ~0.5s in, falling back to frame 0.
-async function extractVideoFrame(buffer, name) {
-  const ext = (path.extname(name) || ".mp4").toLowerCase();
-  const tmp = path.join(os.tmpdir(), `asobu-${uuidv4()}${ext}`);
-  await fs.writeFile(tmp, buffer);
-  try {
-    for (const ss of ["0.5", "0"]) {
-      try {
-        const { stdout } = await execFileP(
-          "ffmpeg",
-          ["-ss", ss, "-i", tmp, "-frames:v", "1", "-an", "-f", "image2pipe",
-            "-vcodec", "png", "pipe:1"],
-          { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 }
-        );
-        if (stdout && stdout.length > 0) return stdout;
-      } catch {
-        /* try next seek position */
-      }
+// Extract a single still frame from an uploaded video file using ffmpeg (returns
+// a PNG buffer, or null if extraction fails). Seeks ~0.5s in, falling back to frame 0.
+async function extractVideoFrame(filePath) {
+  for (const ss of ["0.5", "0"]) {
+    try {
+      const { stdout } = await execFileP(
+        "ffmpeg",
+        ["-ss", ss, "-i", filePath, "-frames:v", "1", "-an", "-f", "image2pipe",
+          "-vcodec", "png", "pipe:1"],
+        { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 }
+      );
+      if (stdout && stdout.length > 0) return stdout;
+    } catch {
+      /* try next seek position */
     }
-    return null;
-  } finally {
-    fs.unlink(tmp).catch(() => {});
   }
+  return null;
+}
+
+// Upload type allowlist. The stored mime type is later sent back as the blob's
+// Content-Type, so it must never be something a browser would execute (e.g.
+// image/svg+xml or text/html). Images are identified from their actual bytes via
+// sharp, never from the client-supplied multipart Content-Type.
+const IMAGE_FORMAT_MIME = {
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  tiff: "image/tiff",
+};
+const VIDEO_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-matroska",
+  "video/ogg",
+  "video/3gpp",
+  "video/x-m4v",
+]);
+
+// Returns the safe mime type to store for this upload, or null to reject it.
+async function detectMimeType(file) {
+  const claimed = String(file.mimetype || "").toLowerCase();
+  if (VIDEO_MIME_TYPES.has(claimed)) return claimed;
+  if (!claimed.startsWith("image/")) return null;
+  let meta;
+  try {
+    meta = await sharp(file.path).metadata();
+  } catch {
+    return null; // not a decodable image
+  }
+  if (meta.format === "heif") return meta.compression === "av1" ? "image/avif" : "image/heic";
+  return IMAGE_FORMAT_MIME[meta.format] || null; // rejects svg, pdf, etc.
 }
 
 // Build a 640px webp thumbnail (poster for video) plus pixel dimensions.
-async function buildThumbnail(file) {
-  const isVideo = file.mimetype.startsWith("video/");
-  const source = isVideo ? await extractVideoFrame(file.buffer, file.originalname) : file.buffer;
+async function buildThumbnail(file, mimeType) {
+  const isVideo = mimeType.startsWith("video/");
+  const source = isVideo ? await extractVideoFrame(file.path) : file.path;
 
   if (!source) {
     // Video frame extraction failed — use a neutral placeholder poster.
@@ -123,19 +182,18 @@ async function buildThumbnail(file) {
 
 // Process a single uploaded image or video: generate a thumbnail/poster, push
 // both blobs to storage, and insert the metadata row. Returns the raw DB row
-// (or null if the file is neither an image nor a video).
+// (or null if the file is not an allowlisted image/video type).
 async function storePhotoFile(file, ownerId) {
-  const isImage = file.mimetype.startsWith("image/");
-  const isVideo = file.mimetype.startsWith("video/");
-  if (!isImage && !isVideo) return null;
+  const mimeType = await detectMimeType(file);
+  if (!mimeType) return null;
 
   const id = uuidv4();
   const objectKey = `originals/${id}`;
   const thumbKey = `thumbs/${id}.webp`;
 
-  const { thumbBuffer, width, height } = await buildThumbnail(file);
+  const { thumbBuffer, width, height } = await buildThumbnail(file, mimeType);
 
-  await putObject(objectKey, file.buffer, file.mimetype);
+  await putFile(objectKey, file.path, mimeType);
   await putObject(thumbKey, thumbBuffer, "image/webp");
 
   const { rows } = await query(
@@ -146,7 +204,7 @@ async function storePhotoFile(file, ownerId) {
     [
       id,
       file.originalname,
-      file.mimetype,
+      mimeType,
       file.size,
       width,
       height,
@@ -159,9 +217,9 @@ async function storePhotoFile(file, ownerId) {
 }
 
 // POST /api/photos — multipart upload of one or more images
-router.post("/", upload.array("photos", 500), async (req, res, next) => {
+router.post("/", limitConcurrentUploads, upload.array("photos", UPLOAD_MAX_FILES), async (req, res, next) => {
+  const files = req.files || [];
   try {
-    const files = req.files || [];
     if (files.length === 0) {
       return res.status(400).json({ error: "No files uploaded" });
     }
@@ -178,6 +236,9 @@ router.post("/", upload.array("photos", 500), async (req, res, next) => {
     res.status(201).json(created);
   } catch (err) {
     next(err);
+  } finally {
+    // Temp spool files are no longer needed once stored (or rejected).
+    for (const f of files) fs.unlink(f.path).catch(() => {});
   }
 });
 
@@ -254,6 +315,11 @@ export async function sendPhotoBlob(req, res, next, row, { key, disposition }) {
     const total = isThumb ? null : Number(row.size_bytes);
 
     res.setHeader("Content-Type", contentType);
+    // Blobs are user content served from the app's origin: never let the browser
+    // sniff them into something else, and if one is opened directly (e.g. a legacy
+    // SVG row), run it in a sandbox with no scripts and no same-origin access.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
     // private: responses depend on the session/share token, so shared caches must not keep them.
     res.setHeader("Cache-Control", "private, max-age=86400");
     if (disposition === "attachment") {

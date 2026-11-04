@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import { initSchema, query } from "./db/pool.js";
 import { ensureBucket } from "./lib/storage.js";
 import { loadSession, requireAuth, requireAdmin, seedInitialAdmin } from "./lib/auth.js";
@@ -53,9 +54,21 @@ app.get("/api/favorites", requireAuth, async (req, res, next) => {
 app.use((err, _req, res, _next) => {
   // Malformed UUIDs in path params etc. → treat as "not found" instead of 500.
   if (err && err.code === "22P02") return res.status(404).json({ error: "Not found" });
+  if (res.headersSent) {
+    console.error("[error]", err);
+    return res.end();
+  }
+  // Upload limit violations (file too large, too many files, …): safe, generic messages.
+  if (err instanceof multer.MulterError) {
+    return res.status(err.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: err.message });
+  }
+  // Client errors flagged as exposable (e.g. malformed JSON from express.json).
+  if (err && err.expose && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  // Anything else is internal: log details server-side, never send them to the client.
   console.error("[error]", err);
-  if (res.headersSent) return res.end();
-  res.status(500).json({ error: err.message || "Internal server error" });
+  res.status(500).json({ error: "Internal server error" });
 });
 
 async function start() {

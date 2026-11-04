@@ -20,10 +20,12 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD (min 8 chars) in .env}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      # Bound to localhost only: MinIO holds every user's originals, and the
+      # backend reaches it over the compose network. Do not publish on 0.0.0.0.
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
 
@@ -34,7 +36,7 @@ services:
     # Retry the alias until MinIO accepts connections, then create the bucket.
     entrypoint: >
       /bin/sh -c "
-      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}; do
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD (min 8 chars) in .env}; do
         echo 'waiting for minio...'; sleep 2;
       done;
       mc mb --ignore-existing local/${MINIO_BUCKET:-photos};
@@ -57,7 +59,7 @@ services:
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD (min 8 chars) in .env}
       MINIO_BUCKET: ${MINIO_BUCKET:-photos}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       # Initial admin — only used when the users table is empty (first boot after
@@ -69,7 +71,8 @@ services:
       # Set to "true" when the app is only reached over HTTPS.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      # Localhost only — remote clients must go through nginx (frontend).
+      - "127.0.0.1:${BACKEND_PORT:-3000}:3000"
 
   frontend:
     build: ./frontend

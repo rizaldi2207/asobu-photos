@@ -23,6 +23,7 @@ function groupByFolder(files) {
   for (const file of files) {
     const type = file.type || "";
     if (!type.startsWith("image/") && !type.startsWith("video/")) continue;
+    if (type === "image/svg+xml") continue; // rejected by the backend (can carry scripts)
     const parts = relPath(file).split("/");
     if (parts.length > 1) {
       const folder = parts[0];

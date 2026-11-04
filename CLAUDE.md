@@ -19,7 +19,7 @@ docker compose down              # stop (add -v to wipe pgdata/miniodata volumes
 ```
 
 - App: http://localhost:8080 · Backend health: http://localhost:3000/api/health · MinIO console: http://localhost:9001
-- Copy `.env.example` to `.env` to override ports/credentials (defaults work out of the box). If you change `FRONTEND_PORT`, also set `PUBLIC_BASE_URL` to match or share links break.
+- Copy `.env.example` to `.env` and set `MINIO_ROOT_PASSWORD` (required; compose refuses to start without it). Backend :3000 and MinIO :9000/:9001 are published on 127.0.0.1 only. If you change `FRONTEND_PORT`, also set `PUBLIC_BASE_URL` to match or share links break.
 
 Running a service outside its container (npm scripts exist only per-service):
 
@@ -50,7 +50,7 @@ in Vite dev the same proxy is configured in `vite.config.js`.
 - `index.js` — Express app, mounts routers, central error handler. On startup calls `initSchema()` then `ensureBucket()`, both of which retry until Postgres/MinIO are reachable.
 - `db/pool.js` — pg Pool + `query()` helper. `initSchema()` applies `db/schema.sql` idempotently (`CREATE TABLE IF NOT EXISTS …`) on every boot — this is the migration mechanism; edit `schema.sql` to change the schema.
 - `lib/storage.js` — MinIO client wrapper (`putObject`, `getObjectStream`, `getPartialObjectStream`, `removeObject`).
-- `routes/photos.js` — upload, list, favorites, and blob streaming. Uploads use multer in-memory storage (1 GB/file limit). `sharp` builds a 640px webp thumbnail; for videos, `extractVideoFrame()` shells out to **ffmpeg** to grab a poster frame (falling back to a neutral placeholder). `streamBlob()` honors HTTP `Range` requests on originals so videos can seek.
+- `routes/photos.js` — upload, list, favorites, and blob streaming. Uploads use multer 2 disk storage (temp files in `os.tmpdir()`, deleted after each request; 1 GB/file, 50 files/request, 2 concurrent uploads per user). Stored mime type comes from `detectMimeType()` (sharp-detected raster formats + a video allowlist; SVG rejected), and `sendPhotoBlob()` always sends `nosniff` + a sandbox CSP. `sharp` builds a 640px webp thumbnail; for videos, `extractVideoFrame()` shells out to **ffmpeg** to grab a poster frame (falling back to a neutral placeholder). `streamBlob()` honors HTTP `Range` requests on originals so videos can seek.
 - `routes/albums.js` / `routes/share.js` — albums (many-to-many via `album_photos`) and share links (opaque `crypto.randomBytes` base64url tokens, kind = `photo`|`album`|`all`, optional expiry).
 
 **Auth** (`lib/auth.js`, `routes/auth.js`, `routes/users.js`): session cookie `asobu_session`

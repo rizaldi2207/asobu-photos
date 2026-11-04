@@ -7,6 +7,7 @@ import {
   destroySession,
   hashPassword,
   isThrottled,
+  loginDelayMs,
   publicUser,
   recordFailure,
   requireAuth,
@@ -27,6 +28,8 @@ router.post("/login", async (req, res, next) => {
     if (isThrottled(req, username)) {
       return res.status(429).json({ error: "Too many failed attempts. Try again later." });
     }
+    const delay = loginDelayMs(req, username);
+    if (delay) await new Promise((r) => setTimeout(r, delay));
 
     const { rows } = await query("SELECT * FROM users WHERE LOWER(username) = LOWER($1)", [
       username.trim(),

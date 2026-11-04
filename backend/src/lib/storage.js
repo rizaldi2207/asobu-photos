@@ -35,6 +35,11 @@ export async function putObject(key, buffer, contentType) {
   });
 }
 
+// Upload a file from local disk (streamed, never fully buffered in memory).
+export async function putFile(key, filePath, contentType) {
+  await minioClient.fPutObject(bucket, key, filePath, { "Content-Type": contentType });
+}
+
 export async function getObjectStream(key) {
   return minioClient.getObject(bucket, key);
 }

@@ -19,7 +19,7 @@ Image bytes are streamed through the backend, so MinIO credentials never reach t
 ## Quick start
 
 ```bash
-cp .env.example .env      # optional — defaults work out of the box
+cp .env.example .env      # then set MINIO_ROOT_PASSWORD (required)
 docker compose up -d --build
 ```
 
